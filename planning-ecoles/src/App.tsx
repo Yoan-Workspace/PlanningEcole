@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AccessGate } from './AccessGate'
 import { fetchSession, logout, type SessionStatus } from './auth'
-import { SESSION_NAME_KEY, SESSION_WEEK_KEY } from './constants'
+import { SESSION_NAME_KEY, SESSION_WEEK_KEY, TUTORIAL_SEEN_KEY } from './constants'
+import { HowItWorks } from './HowItWorks'
 import { sameName, withName } from './names'
 import { SlotEditor } from './SlotEditor'
 import {
@@ -41,6 +42,22 @@ function writeViewWeek(weekStart: string) {
   }
 }
 
+function hasSeenTutorial(): boolean {
+  try {
+    return localStorage.getItem(TUTORIAL_SEEN_KEY) === '1'
+  } catch {
+    return true
+  }
+}
+
+function markTutorialSeen() {
+  try {
+    localStorage.setItem(TUTORIAL_SEEN_KEY, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function App() {
   const [session, setSession] = useState<SessionStatus>('checking')
   const [name, setName] = useState(
@@ -52,6 +69,7 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(false)
   const [cloud, setCloud] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(() => !hasSeenTutorial())
   const savingRef = useRef(false)
   const dirtyRef = useRef(false)
   const baseRef = useRef<AppState | null>(null)
@@ -207,6 +225,16 @@ export default function App() {
     goToWeek(getMonday())
   }
 
+  const closeHelp = useCallback(() => {
+    markTutorialSeen()
+    setHelpOpen(false)
+  }, [])
+
+  function openHelp() {
+    setSelected(null)
+    setHelpOpen(true)
+  }
+
   async function handleLogout() {
     await logout()
     setState(null)
@@ -262,35 +290,48 @@ export default function App() {
           <div className="topbar-title">
             <p className="brand">Trajets</p>
             <p className="who">
-              {name}
-              <button
-                type="button"
-                className="linkish"
-                onClick={() => {
-                  localStorage.removeItem(SESSION_NAME_KEY)
-                  setName('')
-                }}
-              >
-                changer
-              </button>
-              <button type="button" className="linkish" onClick={() => void handleLogout()}>
-                quitter
-              </button>
+              <span className="who-name">{name}</span>
+              <span className="who-actions">
+                <button
+                  type="button"
+                  className="who-chip"
+                  onClick={() => {
+                    localStorage.removeItem(SESSION_NAME_KEY)
+                    setName('')
+                  }}
+                >
+                  Changer
+                </button>
+                <button type="button" className="who-chip" onClick={() => void handleLogout()}>
+                  Quitter
+                </button>
+              </span>
             </p>
           </div>
-          {cloud && saveError ? (
+          <div className="topbar-actions">
             <button
               type="button"
-              className="sync error"
-              onClick={() => void persist(state)}
+              className="help-btn"
+              aria-label="Comment ça marche"
+              aria-expanded={helpOpen}
+              onClick={openHelp}
             >
-              Non enregistré
+              ?
             </button>
-          ) : (
-            <span className={`sync ${cloud ? 'cloud' : 'local'}`}>
-              {cloud ? (saving ? 'Enregistrement…' : 'Enregistré') : 'Cet appareil'}
-            </span>
-          )}
+            {cloud && saveError ? (
+              <button
+                type="button"
+                className="sync error"
+                onClick={() => void persist(state)}
+              >
+                Non enregistré
+              </button>
+            ) : (
+              <span className={`sync ${cloud ? 'cloud' : 'local'}`}>
+                {cloud ? (saving ? 'Enregistrement…' : 'Enregistré') : 'Cet appareil'}
+              </span>
+            )}
+          </div>
         </div>
         <div className="week-nav">
           <button
@@ -344,6 +385,7 @@ export default function App() {
             onClose={() => setSelected(null)}
           />
         ) : null}
+        <HowItWorks open={helpOpen} onClose={closeHelp} />
       </main>
     </div>
   )

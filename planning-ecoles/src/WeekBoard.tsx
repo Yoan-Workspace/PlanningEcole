@@ -44,8 +44,11 @@ export function WeekBoard({
               />
             </label>
             {SCHOOLS.map((school) => (
-              <div key={school.id} className="school-block">
-                <h3>{school.name}</h3>
+              <div key={school.id} className={`school-block school-${school.id}`}>
+                <header className="school-head">
+                  <h3>{school.name}</h3>
+                  <p className="school-kids">{school.children.join(' · ')}</p>
+                </header>
                 <div className="period-row">
                   {PERIODS.map((period) => {
                     const slot = plan[day][school.id][period.id]

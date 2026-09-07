@@ -35,6 +35,16 @@ export function SlotEditor({
     setComment(slot.comment ?? '')
   }, [slot.comment, day, school, period])
 
+  useEffect(() => {
+    const mobile = window.matchMedia('(max-width: 719px)')
+    if (!mobile.matches) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [])
+
   function commit(patch: Partial<Slot> = {}) {
     onChange({
       ...slot,
@@ -72,7 +82,12 @@ export function SlotEditor({
   return (
     <>
       <button type="button" className="editor-backdrop" aria-label="Fermer" onClick={onClose} />
-      <aside className="editor" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+      <aside
+        className={`editor school-${school}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="editor-title"
+      >
         <div className="editor-handle" aria-hidden="true" />
         <div className="editor-header">
           <div>
@@ -168,7 +183,7 @@ export function SlotEditor({
             className="note-field"
             rows={3}
             value={comment}
-            placeholder="Ex. Commmentaire, note, une info"
+            placeholder="Ex. Commentaire, note, une info"
             onChange={(e) => setComment(e.target.value)}
             onBlur={() => commit()}
           />
