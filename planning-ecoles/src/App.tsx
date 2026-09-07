@@ -1,20 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AccessGate } from './AccessGate'
 import { fetchSession, logout, type SessionStatus } from './auth'
 import { SESSION_NAME_KEY } from './constants'
+import { sameName, withName } from './names'
 import { SlotEditor } from './SlotEditor'
 import {
   ensureWeek,
-  formatWeekLabel,
+  formatDayLabel,
+  formatWeekRange,
   getMonday,
+  getWeekNumber,
   isCloudSyncEnabled,
   loadState,
+  removeParentFromState,
   saveState,
   shiftWeek,
   subscribeToCloud,
 } from './storage'
 import type { AppState, Period, SchoolId, Slot, Weekday } from './types'
 import { WeekBoard } from './WeekBoard'
+import { WhoAreYou } from './WhoAreYou'
 import './App.css'
 
 type Selection = { day: Weekday; school: SchoolId; period: Period }
@@ -24,12 +29,14 @@ export default function App() {
   const [name, setName] = useState(
     () => localStorage.getItem(SESSION_NAME_KEY) || '',
   )
-  const [nameDraft, setNameDraft] = useState(name)
   const [state, setState] = useState<AppState | null>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Selection | null>(null)
   const [saving, setSaving] = useState(false)
   const [cloud, setCloud] = useState(false)
+  const savingRef = useRef(false)
+  const localUpdatedAt = useRef(0)
+  const persistTimer = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -51,6 +58,7 @@ export default function App() {
       if (!cancelled) {
         if (!loaded.weekStart) loaded.weekStart = getMonday()
         ensureWeek(loaded, loaded.weekStart)
+        localUpdatedAt.current = loaded.updatedAt ?? 0
         setState(loaded)
         setCloud(isCloudSyncEnabled())
         setLoading(false)
@@ -62,21 +70,42 @@ export default function App() {
   }, [session])
 
   useEffect(() => {
+    return () => window.clearTimeout(persistTimer.current)
+  }, [])
+
+  useEffect(() => {
     if (session !== 'in') return
-    return subscribeToCloud((remote) => {
-      setState(remote)
-      setCloud(isCloudSyncEnabled())
-    })
+    return subscribeToCloud(
+      (remote) => {
+        if ((remote.updatedAt ?? 0) < localUpdatedAt.current) return
+        localUpdatedAt.current = remote.updatedAt ?? Date.now()
+        setState(remote)
+        setCloud(isCloudSyncEnabled())
+      },
+      () => !savingRef.current,
+    )
   }, [session])
 
   async function persist(next: AppState) {
-    setState(next)
+    const stamped: AppState = { ...next, updatedAt: Date.now() }
+    localUpdatedAt.current = stamped.updatedAt ?? 0
+    savingRef.current = true
+    setState(stamped)
     setSaving(true)
     try {
-      await saveState(next)
+      await saveState(stamped)
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
+  }
+
+  function persistSoon(next: AppState) {
+    localUpdatedAt.current = Date.now()
+    window.clearTimeout(persistTimer.current)
+    persistTimer.current = window.setTimeout(() => {
+      void persist(next)
+    }, 450)
   }
 
   function rememberName(value: string) {
@@ -86,12 +115,41 @@ export default function App() {
     setName(trimmed)
   }
 
+  function addParent(value: string): boolean {
+    if (!state) return false
+    const nextList = withName(state.parents ?? [], value)
+    if (nextList.length === (state.parents ?? []).length) return false
+    const next: AppState = structuredClone(state)
+    next.parents = nextList
+    void persist(next)
+    return true
+  }
+
+  function removeParent(value: string) {
+    if (!state) return
+    const next = removeParentFromState(state, value)
+    if (sameName(name, value)) {
+      localStorage.removeItem(SESSION_NAME_KEY)
+      setName('')
+    }
+    void persist(next)
+  }
+
   function updateSlot(day: Weekday, school: SchoolId, period: Period, slot: Slot) {
     if (!state) return
     const next: AppState = structuredClone(state)
     ensureWeek(next, next.weekStart)
     next.plans[next.weekStart][day][school][period] = slot
     void persist(next)
+  }
+
+  function updateDayNote(day: Weekday, note: string) {
+    if (!state) return
+    const next: AppState = structuredClone(state)
+    ensureWeek(next, next.weekStart)
+    next.plans[next.weekStart][day].note = note
+    setState(next)
+    persistSoon(next)
   }
 
   function goWeek(delta: number) {
@@ -127,41 +185,23 @@ export default function App() {
     )
   }
 
-  if (!name) {
-    return (
-      <div className="gate">
-        <div className="gate-panel">
-          <p className="brand">Trajets</p>
-          <h1>Qui es-tu ?</h1>
-          <p className="lede">
-            Indique ton prénom pour marquer tes disponibilités et être reconnu dans le planning.
-          </p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              rememberName(nameDraft)
-            }}
-          >
-            <label htmlFor="prenom">Prénom</label>
-            <input
-              id="prenom"
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              placeholder="Ex. Camille"
-              autoFocus
-            />
-            <button type="submit">Continuer</button>
-          </form>
-        </div>
-      </div>
-    )
-  }
-
   if (loading || !state) {
     return (
       <div className="gate">
         <p className="loading">Chargement du planning…</p>
       </div>
+    )
+  }
+
+  const known = (state.parents ?? []).some((parent) => sameName(parent, name))
+  if (!name || !known) {
+    return (
+      <WhoAreYou
+        parents={state.parents ?? []}
+        onChoose={rememberName}
+        onAdd={addParent}
+        onRemove={removeParent}
+      />
     )
   }
 
@@ -173,9 +213,29 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="topbar-title">
-          <p className="brand">Trajets</p>
-          <h1>Planning</h1>
+        <div className="topbar-lead">
+          <div className="topbar-title">
+            <p className="brand">Trajets</p>
+            <p className="who">
+              {name}
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => {
+                  localStorage.removeItem(SESSION_NAME_KEY)
+                  setName('')
+                }}
+              >
+                changer
+              </button>
+              <button type="button" className="linkish" onClick={() => void handleLogout()}>
+                quitter
+              </button>
+            </p>
+          </div>
+          <span className={`sync ${cloud ? 'cloud' : 'local'}`}>
+            {cloud ? (saving ? 'Enregistrement…' : 'Enregistré') : 'Cet appareil'}
+          </span>
         </div>
         <div className="week-nav">
           <button
@@ -186,7 +246,10 @@ export default function App() {
           >
             ←
           </button>
-          <span className="week-label">{formatWeekLabel(state.weekStart)}</span>
+          <span className="week-label">
+            <strong>Semaine {getWeekNumber(state.weekStart)}</strong>
+            <span>{formatWeekRange(state.weekStart)}</span>
+          </span>
           <button
             type="button"
             className="ghost icon-btn"
@@ -196,45 +259,21 @@ export default function App() {
             →
           </button>
         </div>
-        <div className="user-meta">
-          <span>
-            {name}
-            <button
-              type="button"
-              className="linkish"
-              onClick={() => {
-                localStorage.removeItem(SESSION_NAME_KEY)
-                setName('')
-                setNameDraft('')
-              }}
-            >
-              changer
-            </button>
-            <button type="button" className="linkish" onClick={() => void handleLogout()}>
-              quitter
-            </button>
-          </span>
-          <span className={`sync ${cloud ? 'cloud' : 'local'}`}>
-            {cloud ? (saving ? 'Sync…' : 'Cloud sync') : 'Local'}
-          </span>
-        </div>
       </header>
-
-      {!cloud ? (
-        <p className="banner">
-          Mode local (cet appareil). Sur Netlify, le planning est partagé après connexion.
-        </p>
-      ) : null}
 
       <main className={`main ${selected ? 'with-editor' : ''}`}>
         <WeekBoard
+          weekStart={state.weekStart}
           plan={plan}
           selected={selected}
+          currentName={name}
           onSelect={(day, school, period) => setSelected({ day, school, period })}
+          onDayNote={updateDayNote}
         />
         {selected && selectionSlot ? (
           <SlotEditor
             day={selected.day}
+            dayLabel={formatDayLabel(state.weekStart, selected.day)}
             school={selected.school}
             period={selected.period}
             slot={selectionSlot}

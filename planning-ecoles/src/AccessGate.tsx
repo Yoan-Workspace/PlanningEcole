@@ -33,7 +33,7 @@ export function AccessGate({ onUnlock, serverDown = false }: AccessGateProps) {
         <p className="brand">Trajets</p>
         <h1>Planning des écoles</h1>
         <p className="lede">
-          Espace privé pour organiser les trajets matin et après-midi entre École Michelis et NDJ.
+          Espace privé pour les trajets Michelis et NDJ.
         </p>
         <form onSubmit={handleSubmit}>
           <label htmlFor="access-code">Code d&apos;accès</label>
