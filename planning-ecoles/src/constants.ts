@@ -32,9 +32,5 @@ export const PERIODS = [
   { id: 'soir' as const, label: 'Soir' },
 ]
 
-/** Code d'accès par défaut — à changer via VITE_ACCESS_CODE */
-export const DEFAULT_ACCESS_CODE = 'trajet2026'
-
 export const STORAGE_KEY = 'planning-ecoles-v1'
 export const SESSION_NAME_KEY = 'planning-ecoles-prenom'
-export const SESSION_AUTH_KEY = 'planning-ecoles-auth'

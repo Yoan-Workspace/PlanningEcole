@@ -1,24 +1,30 @@
 import { useState, type FormEvent } from 'react'
-import { DEFAULT_ACCESS_CODE } from './constants'
+import { login } from './auth'
 
 interface AccessGateProps {
   onUnlock: () => void
+  serverDown?: boolean
 }
 
-export function AccessGate({ onUnlock }: AccessGateProps) {
+export function AccessGate({ onUnlock, serverDown = false }: AccessGateProps) {
   const [code, setCode] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(
+    serverDown ? 'Le serveur d’authentification ne répond pas.' : '',
+  )
+  const [pending, setPending] = useState(false)
 
-  const expected = (import.meta.env.VITE_ACCESS_CODE as string | undefined) || DEFAULT_ACCESS_CODE
-
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (code.trim() === expected) {
-      sessionStorage.setItem('planning-ecoles-auth', '1')
+    if (pending) return
+    setPending(true)
+    setError('')
+    const result = await login(code)
+    setPending(false)
+    if (result.ok) {
       onUnlock()
       return
     }
-    setError('Code incorrect. Réessaie.')
+    setError(result.error)
   }
 
   return (
@@ -43,9 +49,12 @@ export function AccessGate({ onUnlock }: AccessGateProps) {
             }}
             placeholder="Entrez le code partagé"
             autoFocus
+            disabled={pending}
           />
           {error ? <p className="error">{error}</p> : null}
-          <button type="submit">Entrer</button>
+          <button type="submit" disabled={pending}>
+            {pending ? 'Vérification…' : 'Entrer'}
+          </button>
         </form>
       </div>
     </div>

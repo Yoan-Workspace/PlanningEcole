@@ -10,17 +10,24 @@ Planning hebdomadaire privé pour organiser les trajets scolaires entre **3 coup
 ## Démarrage local
 
 ```bash
+cd planning-ecoles
+cp .env.example .env
+# renseigner ACCESS_CODE et SESSION_SECRET
 npm install
 npm run dev
 ```
 
-Code d'accès par défaut : `trajet2026` (variable `VITE_ACCESS_CODE`).
+Le code d’accès est vérifié **côté serveur**. Il ne doit jamais être préfixé `VITE_`.
 
 ## Persistance
 
-- **Local** (défaut) : `localStorage` sur l'appareil
-- **Cloud** (recommandé) : Supabase — exécuter `supabase.sql`, puis renseigner `.env`
+- **Local (Vite)** : fichier `.data/planning.json` derrière la session
+- **Netlify** : Blobs (par défaut) ou Supabase si `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
 
-## Déploiement
+## Déploiement Netlify
 
-Vercel ou Netlify — build Vite, dossier `dist`. Ajouter `VITE_ACCESS_CODE` (+ clés Supabase si sync).
+Variables d’environnement (Site settings → Environment variables) :
+
+- `ACCESS_CODE` — le code partagé entre parents
+- `SESSION_SECRET` — chaîne longue aléatoire (cookie signé)
+- optionnel : `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`

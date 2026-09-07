@@ -1,0 +1,21 @@
+[build]
+  command = "npm --prefix planning-ecoles ci && npm --prefix planning-ecoles run build"
+  publish = "planning-ecoles/dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  directory = "planning-ecoles/netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

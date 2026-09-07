@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AccessGate } from './AccessGate'
-import { SESSION_AUTH_KEY, SESSION_NAME_KEY } from './constants'
+import { fetchSession, logout, type SessionStatus } from './auth'
+import { SESSION_NAME_KEY } from './constants'
 import { SlotEditor } from './SlotEditor'
 import {
   ensureWeek,
@@ -19,9 +20,7 @@ import './App.css'
 type Selection = { day: Weekday; school: SchoolId; period: Period }
 
 export default function App() {
-  const [authed, setAuthed] = useState(
-    () => sessionStorage.getItem(SESSION_AUTH_KEY) === '1',
-  )
+  const [session, setSession] = useState<SessionStatus>('checking')
   const [name, setName] = useState(
     () => localStorage.getItem(SESSION_NAME_KEY) || '',
   )
@@ -30,30 +29,45 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Selection | null>(null)
   const [saving, setSaving] = useState(false)
+  const [cloud, setCloud] = useState(false)
 
   useEffect(() => {
-    if (!authed) return
     let cancelled = false
+    void (async () => {
+      const status = await fetchSession()
+      if (!cancelled) setSession(status)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (session !== 'in') return
+    let cancelled = false
+    setLoading(true)
     ;(async () => {
       const loaded = await loadState()
       if (!cancelled) {
         if (!loaded.weekStart) loaded.weekStart = getMonday()
         ensureWeek(loaded, loaded.weekStart)
         setState(loaded)
+        setCloud(isCloudSyncEnabled())
         setLoading(false)
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [authed])
+  }, [session])
 
   useEffect(() => {
-    if (!authed) return
+    if (session !== 'in') return
     return subscribeToCloud((remote) => {
       setState(remote)
+      setCloud(isCloudSyncEnabled())
     })
-  }, [authed])
+  }, [session])
 
   async function persist(next: AppState) {
     setState(next)
@@ -89,8 +103,28 @@ export default function App() {
     void persist(next)
   }
 
-  if (!authed) {
-    return <AccessGate onUnlock={() => setAuthed(true)} />
+  async function handleLogout() {
+    await logout()
+    setState(null)
+    setSelected(null)
+    setSession('out')
+  }
+
+  if (session === 'checking') {
+    return (
+      <div className="gate">
+        <p className="loading">Vérification de l’accès…</p>
+      </div>
+    )
+  }
+
+  if (session !== 'in') {
+    return (
+      <AccessGate
+        serverDown={session === 'down'}
+        onUnlock={() => setSession('in')}
+      />
+    )
   }
 
   if (!name) {
@@ -176,20 +210,19 @@ export default function App() {
             >
               changer
             </button>
+            <button type="button" className="linkish" onClick={() => void handleLogout()}>
+              quitter
+            </button>
           </span>
-          <span className={`sync ${isCloudSyncEnabled() ? 'cloud' : 'local'}`}>
-            {isCloudSyncEnabled()
-              ? saving
-                ? 'Sync…'
-                : 'Cloud sync'
-              : 'Local'}
+          <span className={`sync ${cloud ? 'cloud' : 'local'}`}>
+            {cloud ? (saving ? 'Sync…' : 'Cloud sync') : 'Local'}
           </span>
         </div>
       </header>
 
-      {!isCloudSyncEnabled() ? (
+      {!cloud ? (
         <p className="banner">
-          Mode local (cet appareil). Pour partager entre parents : voir README (Supabase).
+          Mode local (cet appareil). Sur Netlify, le planning est partagé après connexion.
         </p>
       ) : null}
 

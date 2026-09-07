@@ -1,6 +1,5 @@
 import { addDays, format, parseISO, startOfWeek } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { STORAGE_KEY } from './constants'
 import {
   emptySlot,
@@ -10,10 +9,12 @@ import {
   type WeekPlan,
 } from './types'
 
-let supabase: SupabaseClient | null = null
+let cloudEnabled = false
 
 /** Migre l'ancien libellé interne `apresmidi` → `soir` */
-function migrateDaySlots(raw: DaySlots & { michelis?: Record<string, unknown>; ndj?: Record<string, unknown> }): DaySlots {
+function migrateDaySlots(
+  raw: DaySlots & { michelis?: Record<string, unknown>; ndj?: Record<string, unknown> },
+): DaySlots {
   const migrateSchool = (school: Record<string, unknown> | undefined) => {
     const matin = (school?.matin as DaySlots['michelis']['matin']) ?? emptySlot()
     const soir =
@@ -40,16 +41,8 @@ function migrateState(state: AppState): AppState {
   return { ...state, plans }
 }
 
-function getSupabase(): SupabaseClient | null {
-  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
-  if (!url || !key) return null
-  if (!supabase) supabase = createClient(url, key)
-  return supabase
-}
-
 export function isCloudSyncEnabled(): boolean {
-  return Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
+  return cloudEnabled
 }
 
 export function getMonday(date: Date = new Date()): string {
@@ -82,34 +75,37 @@ function saveLocal(state: AppState): void {
 }
 
 export async function loadState(): Promise<AppState> {
-  const client = getSupabase()
-  if (!client) return loadLocal()
-
-  const { data, error } = await client
-    .from('planning_state')
-    .select('payload')
-    .eq('id', 'main')
-    .maybeSingle()
-
-  if (error || !data?.payload) {
-    return loadLocal()
+  try {
+    const res = await fetch('/api/planning', { credentials: 'include' })
+    if (res.ok) {
+      const data = (await res.json()) as { persisted?: boolean; state?: AppState | null }
+      cloudEnabled = Boolean(data.persisted)
+      if (data.state) {
+        const remote = migrateState(data.state)
+        saveLocal(remote)
+        return remote
+      }
+    } else {
+      cloudEnabled = false
+    }
+  } catch {
+    cloudEnabled = false
   }
-
-  const remote = migrateState(data.payload as AppState)
-  saveLocal(remote)
-  return remote
+  return loadLocal()
 }
 
 export async function saveState(state: AppState): Promise<void> {
   saveLocal(state)
-  const client = getSupabase()
-  if (!client) return
-
-  await client.from('planning_state').upsert({
-    id: 'main',
-    payload: state,
-    updated_at: new Date().toISOString(),
+  if (!cloudEnabled) return
+  const res = await fetch('/api/planning', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(state),
   })
+  if (!res.ok) {
+    throw new Error('save_failed')
+  }
 }
 
 export function ensureWeek(state: AppState, weekStart: string): WeekPlan {
@@ -120,25 +116,20 @@ export function ensureWeek(state: AppState, weekStart: string): WeekPlan {
 }
 
 export function subscribeToCloud(onChange: (state: AppState) => void): () => void {
-  const client = getSupabase()
-  if (!client) return () => {}
-
-  const channel = client
-    .channel('planning-sync')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'planning_state', filter: 'id=eq.main' },
-      (payload) => {
-        const row = payload.new as { payload?: AppState } | null
-        if (row?.payload) {
-          saveLocal(row.payload)
-          onChange(row.payload)
-        }
-      },
-    )
-    .subscribe()
-
-  return () => {
-    void client.removeChannel(channel)
-  }
+  const id = window.setInterval(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/planning', { credentials: 'include' })
+        if (!res.ok) return
+        const data = (await res.json()) as { persisted?: boolean; state?: AppState | null }
+        if (!data.persisted || !data.state) return
+        const remote = migrateState(data.state)
+        saveLocal(remote)
+        onChange(remote)
+      } catch {
+        /* ignore */
+      }
+    })()
+  }, 8000)
+  return () => window.clearInterval(id)
 }
