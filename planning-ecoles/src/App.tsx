@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AccessGate } from './AccessGate'
 import { fetchSession, logout, type SessionStatus } from './auth'
-import { SESSION_NAME_KEY } from './constants'
+import { SESSION_NAME_KEY, SESSION_WEEK_KEY } from './constants'
 import { sameName, withName } from './names'
 import { SlotEditor } from './SlotEditor'
 import {
@@ -12,7 +12,6 @@ import {
   getWeekNumber,
   isCloudSyncEnabled,
   loadState,
-  removeParentFromState,
   saveState,
   shiftWeek,
   subscribeToCloud,
@@ -24,6 +23,24 @@ import './App.css'
 
 type Selection = { day: Weekday; school: SchoolId; period: Period }
 
+function readViewWeek(): string {
+  try {
+    const stored = sessionStorage.getItem(SESSION_WEEK_KEY)
+    if (stored && /^\d{4}-\d{2}-\d{2}$/.test(stored)) return stored
+  } catch {
+    /* ignore */
+  }
+  return getMonday()
+}
+
+function writeViewWeek(weekStart: string) {
+  try {
+    sessionStorage.setItem(SESSION_WEEK_KEY, weekStart)
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function App() {
   const [session, setSession] = useState<SessionStatus>('checking')
   const [name, setName] = useState(
@@ -33,10 +50,14 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Selection | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState(false)
   const [cloud, setCloud] = useState(false)
   const savingRef = useRef(false)
+  const dirtyRef = useRef(false)
+  const baseRef = useRef<AppState | null>(null)
   const localUpdatedAt = useRef(0)
   const persistTimer = useRef(0)
+  const viewWeekRef = useRef(readViewWeek())
 
   useEffect(() => {
     let cancelled = false
@@ -56,9 +77,15 @@ export default function App() {
     ;(async () => {
       const loaded = await loadState()
       if (!cancelled) {
-        if (!loaded.weekStart) loaded.weekStart = getMonday()
-        ensureWeek(loaded, loaded.weekStart)
+        const viewWeek = readViewWeek()
+        ensureWeek(loaded, viewWeek)
+        loaded.weekStart = viewWeek
+        writeViewWeek(viewWeek)
+        viewWeekRef.current = viewWeek
+        baseRef.current = structuredClone(loaded)
         localUpdatedAt.current = loaded.updatedAt ?? 0
+        dirtyRef.current = false
+        setSaveError(false)
         setState(loaded)
         setCloud(isCloudSyncEnabled())
         setLoading(false)
@@ -79,21 +106,38 @@ export default function App() {
       (remote) => {
         if ((remote.updatedAt ?? 0) < localUpdatedAt.current) return
         localUpdatedAt.current = remote.updatedAt ?? Date.now()
-        setState(remote)
+        baseRef.current = structuredClone(remote)
+        setState(() => {
+          const weekStart = viewWeekRef.current
+          const next = { ...remote, weekStart }
+          ensureWeek(next, weekStart)
+          return next
+        })
         setCloud(isCloudSyncEnabled())
       },
-      () => !savingRef.current,
+      () => !savingRef.current && !dirtyRef.current,
     )
   }, [session])
 
   async function persist(next: AppState) {
     const stamped: AppState = { ...next, updatedAt: Date.now() }
     localUpdatedAt.current = stamped.updatedAt ?? 0
+    dirtyRef.current = true
     savingRef.current = true
-    setState(stamped)
+    setState({ ...stamped, weekStart: viewWeekRef.current })
     setSaving(true)
     try {
-      await saveState(stamped)
+      const saved = await saveState(stamped, baseRef.current)
+      baseRef.current = structuredClone(saved)
+      localUpdatedAt.current = saved.updatedAt ?? Date.now()
+      const weekStart = viewWeekRef.current
+      const shown = { ...saved, weekStart }
+      ensureWeek(shown, weekStart)
+      setState(shown)
+      setSaveError(false)
+      dirtyRef.current = false
+    } catch {
+      setSaveError(true)
     } finally {
       savingRef.current = false
       setSaving(false)
@@ -101,6 +145,7 @@ export default function App() {
   }
 
   function persistSoon(next: AppState) {
+    dirtyRef.current = true
     localUpdatedAt.current = Date.now()
     window.clearTimeout(persistTimer.current)
     persistTimer.current = window.setTimeout(() => {
@@ -125,16 +170,6 @@ export default function App() {
     return true
   }
 
-  function removeParent(value: string) {
-    if (!state) return
-    const next = removeParentFromState(state, value)
-    if (sameName(name, value)) {
-      localStorage.removeItem(SESSION_NAME_KEY)
-      setName('')
-    }
-    void persist(next)
-  }
-
   function updateSlot(day: Weekday, school: SchoolId, period: Period, slot: Slot) {
     if (!state) return
     const next: AppState = structuredClone(state)
@@ -152,13 +187,24 @@ export default function App() {
     persistSoon(next)
   }
 
-  function goWeek(delta: number) {
+  function goToWeek(weekStart: string) {
     if (!state) return
     const next: AppState = structuredClone(state)
-    next.weekStart = shiftWeek(next.weekStart, delta)
-    ensureWeek(next, next.weekStart)
+    next.weekStart = weekStart
+    ensureWeek(next, weekStart)
+    writeViewWeek(weekStart)
+    viewWeekRef.current = weekStart
     setSelected(null)
-    void persist(next)
+    setState(next)
+  }
+
+  function goWeek(delta: number) {
+    if (!state) return
+    goToWeek(shiftWeek(state.weekStart, delta))
+  }
+
+  function goToday() {
+    goToWeek(getMonday())
   }
 
   async function handleLogout() {
@@ -200,7 +246,6 @@ export default function App() {
         parents={state.parents ?? []}
         onChoose={rememberName}
         onAdd={addParent}
-        onRemove={removeParent}
       />
     )
   }
@@ -233,9 +278,19 @@ export default function App() {
               </button>
             </p>
           </div>
-          <span className={`sync ${cloud ? 'cloud' : 'local'}`}>
-            {cloud ? (saving ? 'Enregistrement…' : 'Enregistré') : 'Cet appareil'}
-          </span>
+          {cloud && saveError ? (
+            <button
+              type="button"
+              className="sync error"
+              onClick={() => void persist(state)}
+            >
+              Non enregistré
+            </button>
+          ) : (
+            <span className={`sync ${cloud ? 'cloud' : 'local'}`}>
+              {cloud ? (saving ? 'Enregistrement…' : 'Enregistré') : 'Cet appareil'}
+            </span>
+          )}
         </div>
         <div className="week-nav">
           <button
@@ -249,6 +304,11 @@ export default function App() {
           <span className="week-label">
             <strong>Semaine {getWeekNumber(state.weekStart)}</strong>
             <span>{formatWeekRange(state.weekStart)}</span>
+            {state.weekStart !== getMonday() ? (
+              <button type="button" className="today-btn" onClick={goToday}>
+                Aujourd’hui
+              </button>
+            ) : null}
           </span>
           <button
             type="button"

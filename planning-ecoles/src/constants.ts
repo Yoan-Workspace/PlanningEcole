@@ -50,3 +50,4 @@ export const DEFAULT_PARENTS = [
 
 export const STORAGE_KEY = 'planning-ecoles-v1'
 export const SESSION_NAME_KEY = 'planning-ecoles-prenom'
+export const SESSION_WEEK_KEY = 'planning-ecoles-semaine'

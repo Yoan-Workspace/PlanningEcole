@@ -5,10 +5,9 @@ interface WhoAreYouProps {
   parents: string[]
   onChoose: (name: string) => void
   onAdd: (name: string) => boolean
-  onRemove: (name: string) => void
 }
 
-export function WhoAreYou({ parents, onChoose, onAdd, onRemove }: WhoAreYouProps) {
+export function WhoAreYou({ parents, onChoose, onAdd }: WhoAreYouProps) {
   const [picked, setPicked] = useState('')
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
@@ -25,12 +24,6 @@ export function WhoAreYou({ parents, onChoose, onAdd, onRemove }: WhoAreYouProps
     setError('')
   }
 
-  function handleRemove(name: string) {
-    if (!confirm(`Supprimer ${name} de la liste ?`)) return
-    onRemove(name)
-    if (sameName(picked, name)) setPicked('')
-  }
-
   return (
     <div className="gate identity">
       <div className="gate-panel identity">
@@ -45,7 +38,7 @@ export function WhoAreYou({ parents, onChoose, onAdd, onRemove }: WhoAreYouProps
             {parents.map((parent) => {
               const selected = sameName(picked, parent)
               return (
-                <li key={parent} className="identity-row">
+                <li key={parent}>
                   <button
                     type="button"
                     className={`identity-choice ${selected ? 'on' : ''}`}
@@ -56,14 +49,6 @@ export function WhoAreYou({ parents, onChoose, onAdd, onRemove }: WhoAreYouProps
                   >
                     <span className={`tick ${selected ? 'on' : ''}`} aria-hidden="true" />
                     {parent}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost identity-delete"
-                    aria-label={`Supprimer ${parent}`}
-                    onClick={() => handleRemove(parent)}
-                  >
-                    ×
                   </button>
                 </li>
               )

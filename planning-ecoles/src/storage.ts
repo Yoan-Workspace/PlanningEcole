@@ -77,6 +77,99 @@ function resolveParents(raw: string[] | undefined): string[] {
   return raw
 }
 
+function mergeNameSets(base: string[], local: string[], remote: string[]): string[] {
+  const removed = [
+    ...base.filter((name) => !local.some((item) => sameName(item, name))),
+    ...base.filter((name) => !remote.some((item) => sameName(item, name))),
+  ]
+  const out: string[] = []
+  for (const name of [...local, ...remote]) {
+    if (removed.some((item) => sameName(item, name))) continue
+    if (out.some((item) => sameName(item, name))) continue
+    out.push(name)
+  }
+  return out
+}
+
+function mergeField<T>(base: T, local: T, remote: T): T {
+  if (Object.is(local, base)) return remote
+  if (Object.is(remote, base)) return local
+  return local
+}
+
+function mergeSlot(base: Slot, local: Slot, remote: Slot): Slot {
+  const next: Slot = {
+    availableParents: mergeNameSets(
+      base.availableParents,
+      local.availableParents,
+      remote.availableParents,
+    ),
+    children: mergeNameSets(base.children, local.children, remote.children),
+    accompanying: mergeField(base.accompanying, local.accompanying, remote.accompanying),
+    comment: mergeField(base.comment ?? '', local.comment ?? '', remote.comment ?? ''),
+  }
+  if (
+    next.accompanying &&
+    !next.availableParents.some((name) => sameName(name, next.accompanying as string))
+  ) {
+    next.availableParents = [...next.availableParents, next.accompanying]
+  }
+  return next
+}
+
+function mergeDay(base: DaySlots, local: DaySlots, remote: DaySlots): DaySlots {
+  const school = (id: SchoolId) => ({
+    matin: mergeSlot(base[id].matin, local[id].matin, remote[id].matin),
+    soir: mergeSlot(base[id].soir, local[id].soir, remote[id].soir),
+  })
+  return {
+    note: mergeField(base.note, local.note, remote.note),
+    michelis: school('michelis'),
+    ndj: school('ndj'),
+  }
+}
+
+function mergeWeek(base: WeekPlan, local: WeekPlan, remote: WeekPlan): WeekPlan {
+  const next = emptyWeekPlan()
+  for (const day of Object.keys(next) as Weekday[]) {
+    next[day] = mergeDay(base[day], local[day], remote[day])
+  }
+  return next
+}
+
+export function mergeStates(base: AppState, local: AppState, remote: AppState): AppState {
+  const weeks = new Set([
+    ...Object.keys(base.plans ?? {}),
+    ...Object.keys(local.plans ?? {}),
+    ...Object.keys(remote.plans ?? {}),
+  ])
+  const plans: AppState['plans'] = {}
+  const empty = emptyWeekPlan()
+  for (const week of weeks) {
+    const localWeek = local.plans?.[week]
+    const remoteWeek = remote.plans?.[week]
+    if (!localWeek && remoteWeek) {
+      plans[week] = remoteWeek
+      continue
+    }
+    if (!remoteWeek && localWeek) {
+      plans[week] = localWeek
+      continue
+    }
+    if (!localWeek || !remoteWeek) continue
+    plans[week] = mergeWeek(base.plans?.[week] ?? empty, localWeek, remoteWeek)
+  }
+  return {
+    ...remote,
+    ...local,
+    weekStart: remote.weekStart || local.weekStart,
+    parents: mergeNameSets(base.parents ?? [], local.parents ?? [], remote.parents ?? []),
+    plans,
+    schemaVersion: Math.max(local.schemaVersion ?? 2, remote.schemaVersion ?? 2, 2),
+    updatedAt: Math.max(local.updatedAt ?? 0, remote.updatedAt ?? 0),
+  }
+}
+
 export function isCloudSyncEnabled(): boolean {
   return cloudEnabled
 }
@@ -139,18 +232,39 @@ export async function loadState(): Promise<AppState> {
   return loadLocal()
 }
 
-export async function saveState(state: AppState): Promise<void> {
+async function fetchCloudState(): Promise<AppState | null> {
+  const res = await fetch('/api/planning', { credentials: 'include' })
+  if (!res.ok) throw new Error('load_failed')
+  const data = (await res.json()) as { persisted?: boolean; state?: AppState | null }
+  if (!data.persisted || !data.state) return null
+  return migrateState(data.state)
+}
+
+export async function saveState(state: AppState, base: AppState | null): Promise<AppState> {
+  const viewWeek = state.weekStart
   saveLocal(state)
-  if (!cloudEnabled) return
+  if (!cloudEnabled) {
+    return state
+  }
+  const remote = await fetchCloudState()
+  const merged = remote ? mergeStates(base ?? remote, state, remote) : state
+  const toSave: AppState = {
+    ...merged,
+    weekStart: remote?.weekStart || merged.weekStart,
+    updatedAt: state.updatedAt ?? Date.now(),
+  }
   const res = await fetch('/api/planning', {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(state),
+    body: JSON.stringify(toSave),
   })
   if (!res.ok) {
     throw new Error('save_failed')
   }
+  const kept: AppState = { ...toSave, weekStart: viewWeek }
+  saveLocal(kept)
+  return kept
 }
 
 export function ensureWeek(state: AppState, weekStart: string): WeekPlan {
