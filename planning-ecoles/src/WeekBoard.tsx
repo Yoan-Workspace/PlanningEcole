@@ -10,6 +10,7 @@ interface WeekBoardProps {
   currentName: string
   onSelect: (day: Weekday, school: SchoolId, period: Period) => void
   onDayNote: (day: Weekday, note: string) => void
+  onDayNoteFlush: () => void
 }
 
 function kidsNote(children: string[], all: string[]): string | null {
@@ -26,6 +27,7 @@ export function WeekBoard({
   currentName,
   onSelect,
   onDayNote,
+  onDayNoteFlush,
 }: WeekBoardProps) {
   return (
     <div className="board">
@@ -41,6 +43,7 @@ export function WeekBoard({
                 value={plan[day].note}
                 placeholder="Note du jour, un commentaire, une info"
                 onChange={(e) => onDayNote(day, e.target.value)}
+                onBlur={onDayNoteFlush}
               />
             </label>
             {SCHOOLS.map((school) => (

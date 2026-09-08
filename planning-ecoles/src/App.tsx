@@ -75,6 +75,7 @@ export default function App() {
   const baseRef = useRef<AppState | null>(null)
   const localUpdatedAt = useRef(0)
   const persistTimer = useRef(0)
+  const pendingPersistRef = useRef<AppState | null>(null)
   const viewWeekRef = useRef(readViewWeek())
 
   useEffect(() => {
@@ -138,37 +139,68 @@ export default function App() {
   }, [session])
 
   async function persist(next: AppState) {
-    const stamped: AppState = { ...next, updatedAt: Date.now() }
-    localUpdatedAt.current = stamped.updatedAt ?? 0
-    dirtyRef.current = true
+    pendingPersistRef.current = next
+    if (savingRef.current) {
+      dirtyRef.current = true
+      return
+    }
+
     savingRef.current = true
-    setState({ ...stamped, weekStart: viewWeekRef.current })
     setSaving(true)
+    dirtyRef.current = true
+
     try {
-      const saved = await saveState(stamped, baseRef.current)
-      baseRef.current = structuredClone(saved)
-      localUpdatedAt.current = saved.updatedAt ?? Date.now()
-      const weekStart = viewWeekRef.current
-      const shown = { ...saved, weekStart }
-      ensureWeek(shown, weekStart)
-      setState(shown)
-      setSaveError(false)
-      dirtyRef.current = false
-    } catch {
-      setSaveError(true)
+      while (pendingPersistRef.current) {
+        const snapshot = pendingPersistRef.current
+        pendingPersistRef.current = null
+        const stamped: AppState = { ...snapshot, updatedAt: Date.now() }
+        localUpdatedAt.current = stamped.updatedAt ?? 0
+        try {
+          const saved = await saveState(stamped, baseRef.current)
+          baseRef.current = structuredClone(saved)
+          localUpdatedAt.current = saved.updatedAt ?? Date.now()
+          if (pendingPersistRef.current) {
+            dirtyRef.current = true
+            continue
+          }
+          if (persistTimer.current) {
+            dirtyRef.current = true
+            break
+          }
+          const weekStart = viewWeekRef.current
+          const shown = { ...saved, weekStart }
+          ensureWeek(shown, weekStart)
+          setState(shown)
+          setSaveError(false)
+          dirtyRef.current = false
+        } catch {
+          setSaveError(true)
+          break
+        }
+      }
     } finally {
       savingRef.current = false
       setSaving(false)
     }
   }
 
-  function persistSoon(next: AppState) {
+  function persistSoon(next: AppState, delay = 2000) {
     dirtyRef.current = true
     localUpdatedAt.current = Date.now()
+    pendingPersistRef.current = next
     window.clearTimeout(persistTimer.current)
     persistTimer.current = window.setTimeout(() => {
-      void persist(next)
-    }, 450)
+      persistTimer.current = 0
+      const pending = pendingPersistRef.current
+      if (pending) void persist(pending)
+    }, delay)
+  }
+
+  function flushPendingPersist() {
+    window.clearTimeout(persistTimer.current)
+    persistTimer.current = 0
+    const pending = pendingPersistRef.current
+    if (pending) void persist(pending)
   }
 
   function rememberName(value: string) {
@@ -207,6 +239,7 @@ export default function App() {
 
   function goToWeek(weekStart: string) {
     if (!state) return
+    flushPendingPersist()
     const next: AppState = structuredClone(state)
     next.weekStart = weekStart
     ensureWeek(next, weekStart)
@@ -370,6 +403,7 @@ export default function App() {
           currentName={name}
           onSelect={(day, school, period) => setSelected({ day, school, period })}
           onDayNote={updateDayNote}
+          onDayNoteFlush={flushPendingPersist}
         />
         {selected && selectionSlot ? (
           <SlotEditor
