@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AccessGate } from './AccessGate'
 import { fetchSession, logout, type SessionStatus } from './auth'
-import { SESSION_NAME_KEY, SESSION_WEEK_KEY, TUTORIAL_SEEN_KEY } from './constants'
+import { SESSION_NAME_KEY, TUTORIAL_SEEN_KEY } from './constants'
 import { HowItWorks } from './HowItWorks'
 import { sameName, withName } from './names'
 import { SlotEditor } from './SlotEditor'
@@ -13,7 +13,11 @@ import {
   getWeekNumber,
   isCloudSyncEnabled,
   loadState,
+  oldestAllowedWeek,
+  pruneOldWeeks,
+  didPruneWeeks,
   saveState,
+  scrollWeekday,
   shiftWeek,
   subscribeToCloud,
 } from './storage'
@@ -23,24 +27,6 @@ import { WhoAreYou } from './WhoAreYou'
 import './App.css'
 
 type Selection = { day: Weekday; school: SchoolId; period: Period }
-
-function readViewWeek(): string {
-  try {
-    const stored = sessionStorage.getItem(SESSION_WEEK_KEY)
-    if (stored && /^\d{4}-\d{2}-\d{2}$/.test(stored)) return stored
-  } catch {
-    /* ignore */
-  }
-  return getMonday()
-}
-
-function writeViewWeek(weekStart: string) {
-  try {
-    sessionStorage.setItem(SESSION_WEEK_KEY, weekStart)
-  } catch {
-    /* ignore */
-  }
-}
 
 function hasSeenTutorial(): boolean {
   try {
@@ -76,7 +62,7 @@ export default function App() {
   const localUpdatedAt = useRef(0)
   const persistTimer = useRef(0)
   const pendingPersistRef = useRef<AppState | null>(null)
-  const viewWeekRef = useRef(readViewWeek())
+  const viewWeekRef = useRef(getMonday())
 
   useEffect(() => {
     let cancelled = false
@@ -96,18 +82,21 @@ export default function App() {
     ;(async () => {
       const loaded = await loadState()
       if (!cancelled) {
-        const viewWeek = readViewWeek()
-        ensureWeek(loaded, viewWeek)
-        loaded.weekStart = viewWeek
-        writeViewWeek(viewWeek)
+        const trimmed = pruneOldWeeks(loaded)
+        const viewWeek = getMonday()
+        ensureWeek(trimmed, viewWeek)
+        trimmed.weekStart = viewWeek
         viewWeekRef.current = viewWeek
-        baseRef.current = structuredClone(loaded)
-        localUpdatedAt.current = loaded.updatedAt ?? 0
+        baseRef.current = structuredClone(trimmed)
+        localUpdatedAt.current = trimmed.updatedAt ?? 0
         dirtyRef.current = false
         setSaveError(false)
-        setState(loaded)
+        setState(trimmed)
         setCloud(isCloudSyncEnabled())
         setLoading(false)
+        if (didPruneWeeks(loaded, trimmed) && isCloudSyncEnabled()) {
+          void saveState(trimmed, trimmed)
+        }
       }
     })()
     return () => {
@@ -128,7 +117,7 @@ export default function App() {
         baseRef.current = structuredClone(remote)
         setState(() => {
           const weekStart = viewWeekRef.current
-          const next = { ...remote, weekStart }
+          const next = pruneOldWeeks({ ...remote, weekStart })
           ensureWeek(next, weekStart)
           return next
         })
@@ -239,11 +228,12 @@ export default function App() {
 
   function goToWeek(weekStart: string) {
     if (!state) return
+    const oldest = oldestAllowedWeek()
+    if (weekStart < oldest) return
     flushPendingPersist()
     const next: AppState = structuredClone(state)
     next.weekStart = weekStart
     ensureWeek(next, weekStart)
-    writeViewWeek(weekStart)
     viewWeekRef.current = weekStart
     setSelected(null)
     setState(next)
@@ -312,6 +302,8 @@ export default function App() {
   }
 
   const plan = ensureWeek(state, state.weekStart)
+  const thisWeek = getMonday()
+  const canGoBack = state.weekStart > oldestAllowedWeek()
   const selectionSlot = selected
     ? plan[selected.day][selected.school][selected.period]
     : null
@@ -371,6 +363,7 @@ export default function App() {
             type="button"
             className="ghost icon-btn"
             onClick={() => goWeek(-1)}
+            disabled={!canGoBack}
             aria-label="Semaine précédente"
           >
             ←
@@ -378,7 +371,7 @@ export default function App() {
           <span className="week-label">
             <strong>Semaine {getWeekNumber(state.weekStart)}</strong>
             <span>{formatWeekRange(state.weekStart)}</span>
-            {state.weekStart !== getMonday() ? (
+            {state.weekStart !== thisWeek ? (
               <button type="button" className="today-btn" onClick={goToday}>
                 Aujourd’hui
               </button>
@@ -401,6 +394,7 @@ export default function App() {
           plan={plan}
           selected={selected}
           currentName={name}
+          scrollToDay={state.weekStart === thisWeek ? scrollWeekday() : null}
           onSelect={(day, school, period) => setSelected({ day, school, period })}
           onDayNote={updateDayNote}
           onDayNoteFlush={flushPendingPersist}

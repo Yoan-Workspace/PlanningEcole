@@ -121,8 +121,8 @@ export function SlotEditor({
         </section>
 
         <section>
-          <h3>Enfants du trajet</h3>
-          <p className="hint">Tous sont inclus par défaut. Décoche si un enfant ne vient pas.</p>
+          <h3>Quels enfants viennent ?</h3>
+          <p className="hint">Tous sont cochés. Décoche seulement celui qui ne vient pas.</p>
           <div className="chip-grid">
             {schoolMeta.children.map((child) => {
               const checked = slot.children.includes(child)

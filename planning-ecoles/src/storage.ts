@@ -1,4 +1,4 @@
-import { addDays, format, getISOWeek, parseISO, startOfWeek } from 'date-fns'
+import { addDays, format, getISODay, getISOWeek, parseISO, startOfWeek } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { DEFAULT_PARENTS, STORAGE_KEY, WEEKDAY_LABELS, WEEKDAY_OFFSET } from './constants'
 import { sameName, withoutName } from './names'
@@ -197,6 +197,32 @@ export function shiftWeek(weekStart: string, delta: number): string {
   return format(addDays(parseISO(weekStart), delta * 7), 'yyyy-MM-dd')
 }
 
+export function oldestAllowedWeek(date: Date = new Date()): string {
+  return shiftWeek(getMonday(date), -1)
+}
+
+export function pruneOldWeeks(state: AppState, date: Date = new Date()): AppState {
+  const oldest = oldestAllowedWeek(date)
+  const plans: AppState['plans'] = {}
+  for (const [week, plan] of Object.entries(state.plans ?? {})) {
+    if (week >= oldest) plans[week] = plan
+  }
+  return { ...state, plans }
+}
+
+export function didPruneWeeks(before: AppState, after: AppState): boolean {
+  return Object.keys(before.plans ?? {}).length !== Object.keys(after.plans ?? {}).length
+}
+
+/** Jour du tableau vers lequel scroller (mercredi → jeudi, week-end → vendredi). */
+export function scrollWeekday(date: Date = new Date()): Weekday {
+  const day = getISODay(date)
+  if (day <= 1) return 'lundi'
+  if (day === 2) return 'mardi'
+  if (day <= 4) return 'jeudi'
+  return 'vendredi'
+}
+
 function loadLocal(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -248,11 +274,11 @@ export async function saveState(state: AppState, base: AppState | null): Promise
   }
   const remote = await fetchCloudState()
   const merged = remote ? mergeStates(base ?? remote, state, remote) : state
-  const toSave: AppState = {
+  const toSave: AppState = pruneOldWeeks({
     ...merged,
     weekStart: remote?.weekStart || merged.weekStart,
     updatedAt: state.updatedAt ?? Date.now(),
-  }
+  })
   const res = await fetch('/api/planning', {
     method: 'PUT',
     credentials: 'include',

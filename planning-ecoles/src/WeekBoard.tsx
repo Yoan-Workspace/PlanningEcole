@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { PERIODS, SCHOOLS, WEEKDAYS } from './constants'
 import { sameName } from './names'
 import { formatDayLabel } from './storage'
@@ -8,9 +9,20 @@ interface WeekBoardProps {
   plan: WeekPlan
   selected: { day: Weekday; school: SchoolId; period: Period } | null
   currentName: string
+  scrollToDay: Weekday | null
   onSelect: (day: Weekday, school: SchoolId, period: Period) => void
   onDayNote: (day: Weekday, note: string) => void
   onDayNoteFlush: () => void
+}
+
+function scrollPage(top: number) {
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+}
+
+function scrollBelowTopbar(el: HTMLElement) {
+  const topbar = document.querySelector('.topbar')
+  const offset = (topbar instanceof HTMLElement ? topbar.getBoundingClientRect().height : 0) + 12
+  scrollPage(el.getBoundingClientRect().top + window.scrollY - offset)
 }
 
 function kidsNote(children: string[], all: string[]): string | null {
@@ -25,16 +37,33 @@ export function WeekBoard({
   plan,
   selected,
   currentName,
+  scrollToDay,
   onSelect,
   onDayNote,
   onDayNoteFlush,
 }: WeekBoardProps) {
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (scrollToDay) {
+        const el = document.getElementById(`day-${scrollToDay}`)
+        if (el) scrollBelowTopbar(el)
+        return
+      }
+      scrollPage(0)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [weekStart, scrollToDay])
+
   return (
     <div className="board">
       {WEEKDAYS.map((day) => {
         const dayLabel = formatDayLabel(weekStart, day)
         return (
-          <section key={day} className="day-column">
+          <section
+            key={day}
+            id={`day-${day}`}
+            className={`day-column${scrollToDay === day ? ' is-today' : ''}`}
+          >
             <h2>{dayLabel}</h2>
             <label className="day-note-wrap">
               <span className="sr-only">Note du {dayLabel}</span>
