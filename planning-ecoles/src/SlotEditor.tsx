@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { PERIODS, SCHOOLS } from './constants'
+import { PERIODS, SCHOOLS, WEEKDAY_LABELS, WEEKDAY_SHORT, WEEKDAYS } from './constants'
 import { sameName, withName, withoutName } from './names'
 import type { Period, SchoolId, Slot, Weekday } from './types'
+
+function formatDayList(days: Weekday[]): string {
+  const labels = days.map((item) => WEEKDAY_LABELS[item].toLowerCase())
+  if (labels.length === 1) return labels[0]
+  if (labels.length === 2) return `${labels[0]} et ${labels[1]}`
+  return `${labels.slice(0, -1).join(', ')} et ${labels[labels.length - 1]}`
+}
 
 interface SlotEditorProps {
   day: Weekday
@@ -11,6 +18,7 @@ interface SlotEditorProps {
   slot: Slot
   currentName: string
   onChange: (slot: Slot) => void
+  onRepeat: (days: Weekday[], available: boolean) => void
   onClose: () => void
 }
 
@@ -22,17 +30,22 @@ export function SlotEditor({
   slot,
   currentName,
   onChange,
+  onRepeat,
   onClose,
 }: SlotEditorProps) {
   const schoolMeta = SCHOOLS.find((s) => s.id === school)!
   const periodLabel = PERIODS.find((p) => p.id === period)!.label
   const isAvailable = slot.availableParents.some((n) => sameName(n, currentName))
   const [comment, setComment] = useState(slot.comment ?? '')
+  const [repeatDays, setRepeatDays] = useState<Weekday[]>([day])
+  const [repeatDone, setRepeatDone] = useState(false)
   const commentRef = useRef(comment)
   commentRef.current = comment
 
   useEffect(() => {
     setComment(slot.comment ?? '')
+    setRepeatDays([day])
+    setRepeatDone(false)
   }, [slot.comment, day, school, period])
 
   useEffect(() => {
@@ -62,6 +75,7 @@ export function SlotEditor({
       accompanying = null
     }
     onChange({ ...slot, availableParents, accompanying, comment: commentRef.current.trim() })
+    setRepeatDone(false)
   }
 
   function toggleChild(name: string) {
@@ -77,6 +91,21 @@ export function SlotEditor({
       comment: commentRef.current.trim(),
       accompanying: slot.accompanying && sameName(slot.accompanying, name) ? null : name,
     })
+  }
+
+  function toggleRepeatDay(weekday: Weekday) {
+    setRepeatDone(false)
+    setRepeatDays((current) =>
+      current.includes(weekday)
+        ? current.filter((item) => item !== weekday)
+        : WEEKDAYS.filter((item) => item === weekday || current.includes(item)),
+    )
+  }
+
+  function applyRepeat() {
+    if (repeatDays.length === 0) return
+    onRepeat(repeatDays, isAvailable)
+    setRepeatDone(true)
   }
 
   return (
@@ -117,6 +146,41 @@ export function SlotEditor({
             <span className="switch-track" aria-hidden="true">
               <span className="switch-thumb" />
             </span>
+          </button>
+        </section>
+
+        <section>
+          <h3>Répéter ces jours-là</h3>
+          <p className="hint">
+            Cette semaine et les 2 suivantes. Même école, même moment.
+          </p>
+          <div className="chip-grid">
+            {WEEKDAYS.map((weekday) => {
+              const checked = repeatDays.includes(weekday)
+              return (
+                <button
+                  key={weekday}
+                  type="button"
+                  className={`chip ${checked ? 'on' : ''}`}
+                  aria-pressed={checked}
+                  onClick={() => toggleRepeatDay(weekday)}
+                >
+                  {WEEKDAY_SHORT[weekday]}
+                </button>
+              )
+            })}
+          </div>
+          <button
+            type="button"
+            className="ghost repeat-btn"
+            disabled={repeatDays.length === 0}
+            onClick={applyRepeat}
+          >
+            {repeatDone
+              ? 'C’est noté pour cette semaine et les 2 suivantes'
+              : isAvailable
+                ? `Me proposer ${formatDayList(repeatDays)}`
+                : `Me retirer ${formatDayList(repeatDays)}`}
           </button>
         </section>
 

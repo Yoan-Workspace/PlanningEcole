@@ -3,7 +3,7 @@ import { AccessGate } from './AccessGate'
 import { fetchSession, logout, type SessionStatus } from './auth'
 import { SESSION_NAME_KEY, TUTORIAL_SEEN_KEY } from './constants'
 import { HowItWorks } from './HowItWorks'
-import { sameName, withName } from './names'
+import { sameName, withName, withoutName } from './names'
 import { SlotEditor } from './SlotEditor'
 import {
   ensureWeek,
@@ -217,6 +217,28 @@ export default function App() {
     void persist(next)
   }
 
+  function repeatAvailability(days: Weekday[], available: boolean) {
+    if (!state || !selected) return
+    const next: AppState = structuredClone(state)
+    const { school, period } = selected
+    for (const delta of [0, 1, 2]) {
+      const week = shiftWeek(state.weekStart, delta)
+      ensureWeek(next, week)
+      for (const weekday of days) {
+        const slot = next.plans[week][weekday][school][period]
+        if (available) {
+          slot.availableParents = withName(slot.availableParents, name)
+        } else {
+          slot.availableParents = withoutName(slot.availableParents, name)
+          if (slot.accompanying && sameName(slot.accompanying, name)) {
+            slot.accompanying = null
+          }
+        }
+      }
+    }
+    void persist(next)
+  }
+
   function updateDayNote(day: Weekday, note: string) {
     if (!state) return
     const next: AppState = structuredClone(state)
@@ -410,6 +432,7 @@ export default function App() {
             onChange={(slot) =>
               updateSlot(selected.day, selected.school, selected.period, slot)
             }
+            onRepeat={repeatAvailability}
             onClose={() => setSelected(null)}
           />
         ) : null}

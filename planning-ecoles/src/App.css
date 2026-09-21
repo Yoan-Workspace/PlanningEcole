@@ -725,6 +725,7 @@ button.ghost {
   border-radius: 999px;
   border: 1px solid var(--line);
   background: #fff;
+  color: var(--ink);
   cursor: pointer;
   font-weight: 600;
 }
@@ -738,6 +739,16 @@ button.ghost {
 .chip.on {
   background: rgba(31, 107, 79, 0.12);
   border-color: rgba(31, 107, 79, 0.32);
+}
+
+.repeat-btn {
+  width: 100%;
+  margin-top: 0.15rem;
+  text-align: center;
+}
+
+.repeat-btn:disabled {
+  cursor: default;
 }
 
 .parent-list {

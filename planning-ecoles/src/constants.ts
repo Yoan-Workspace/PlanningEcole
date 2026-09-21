@@ -9,6 +9,13 @@ export const WEEKDAY_LABELS: Record<Weekday, string> = {
   vendredi: 'Vendredi',
 }
 
+export const WEEKDAY_SHORT: Record<Weekday, string> = {
+  lundi: 'Lun',
+  mardi: 'Mar',
+  jeudi: 'Jeu',
+  vendredi: 'Ven',
+}
+
 /** Jours depuis le lundi (weekStart). Pas de mercredi. */
 export const WEEKDAY_OFFSET: Record<Weekday, number> = {
   lundi: 0,

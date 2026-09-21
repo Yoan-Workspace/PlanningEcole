@@ -66,7 +66,7 @@ export function HowItWorks({ open, onClose }: HowItWorksProps) {
           <li>
             <div>
               <strong>Propose-toi</strong>
-              <p>Dis que tu peux y aller. Le créneau passe en attente.</p>
+              <p>Dis que tu peux y aller. Tu peux aussi répéter cette semaine et les 2 suivantes.</p>
             </div>
             <div className="slot-btn waiting tuto-slot" aria-hidden="true">
               <span className="slot-period">Matin</span>
