@@ -103,6 +103,8 @@ export function SlotEditor({
   const commentRef = useRef(comment)
   commentRef.current = comment
   const extraSummary = extraDaysSummary(thisWeekDays, nextWeekDays, day)
+  const slotRef = useRef(slot)
+  slotRef.current = slot
 
   useEffect(() => {
     setComment(slot.comment ?? '')
@@ -123,22 +125,26 @@ export function SlotEditor({
   }, [])
 
   function commit(patch: Partial<Slot> = {}) {
-    onChange({
-      ...slot,
+    const next = {
+      ...slotRef.current,
       comment: commentRef.current.trim(),
       ...patch,
-    })
+    }
+    slotRef.current = next
+    onChange(next)
   }
 
   function toggleParent() {
-    const availableParents = isAvailable
-      ? withoutName(slot.availableParents, currentName)
-      : withName(slot.availableParents, currentName)
-    let accompanying = slot.accompanying
+    const current = slotRef.current
+    const available = current.availableParents.some((n) => sameName(n, currentName))
+    const availableParents = available
+      ? withoutName(current.availableParents, currentName)
+      : withName(current.availableParents, currentName)
+    let accompanying = current.accompanying
     if (accompanying && !availableParents.some((n) => sameName(n, accompanying!))) {
       accompanying = null
     }
-    onChange({ ...slot, availableParents, accompanying, comment: commentRef.current.trim() })
+    commit({ availableParents, accompanying })
   }
 
   function toggleThisWeekDay(weekday: Weekday, nextOn: boolean) {
@@ -150,23 +156,27 @@ export function SlotEditor({
   }
 
   function toggleChild(name: string) {
-    const children = slot.children.includes(name)
-      ? slot.children.filter((c) => c !== name)
-      : [...slot.children, name]
-    onChange({ ...slot, children, comment: commentRef.current.trim() })
+    const children = slotRef.current.children.includes(name)
+      ? slotRef.current.children.filter((c) => c !== name)
+      : [...slotRef.current.children, name]
+    commit({ children })
   }
 
   function setAccompanying(name: string) {
-    onChange({
-      ...slot,
-      comment: commentRef.current.trim(),
-      accompanying: slot.accompanying && sameName(slot.accompanying, name) ? null : name,
+    const current = slotRef.current
+    commit({
+      accompanying: current.accompanying && sameName(current.accompanying, name) ? null : name,
     })
+  }
+
+  function close() {
+    commit()
+    onClose()
   }
 
   return (
     <>
-      <button type="button" className="editor-backdrop" aria-label="Fermer" onClick={onClose} />
+      <button type="button" className="editor-backdrop" aria-label="Fermer" onClick={close} />
       <aside
         className={`editor school-${school}`}
         role="dialog"
@@ -181,7 +191,7 @@ export function SlotEditor({
             </p>
             <h2 id="editor-title">{schoolMeta.name}</h2>
           </div>
-          <button type="button" className="ghost close-btn" onClick={onClose} aria-label="Fermer">
+          <button type="button" className="ghost close-btn" onClick={close} aria-label="Fermer">
             Fermer
           </button>
         </div>

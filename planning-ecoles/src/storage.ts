@@ -238,6 +238,10 @@ function saveLocal(state: AppState): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
 }
 
+export function writeLocalState(state: AppState): void {
+  saveLocal(state)
+}
+
 export async function loadState(): Promise<AppState> {
   try {
     const res = await fetch('/api/planning', { credentials: 'include' })
