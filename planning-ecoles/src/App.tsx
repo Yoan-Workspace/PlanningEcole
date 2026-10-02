@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AccessGate } from './AccessGate'
 import { fetchSession, logout, type SessionStatus } from './auth'
-import { SESSION_NAME_KEY, TUTORIAL_SEEN_KEY } from './constants'
+import { SESSION_NAME_KEY, TUTORIAL_SEEN_KEY, WEEKDAYS } from './constants'
 import { HowItWorks } from './HowItWorks'
-import { sameName, withName } from './names'
+import { sameName, withName, withoutName } from './names'
 import { SlotEditor } from './SlotEditor'
 import {
   ensureWeek,
@@ -21,7 +21,7 @@ import {
   shiftWeek,
   subscribeToCloud,
 } from './storage'
-import type { AppState, Period, SchoolId, Slot, Weekday } from './types'
+import type { AppState, Period, SchoolId, Slot, WeekPlan, Weekday } from './types'
 import { WeekBoard } from './WeekBoard'
 import { WhoAreYou } from './WhoAreYou'
 import './App.css'
@@ -42,6 +42,20 @@ function markTutorialSeen() {
   } catch {
     /* ignore */
   }
+}
+
+function daysWithParent(
+  plan: WeekPlan | undefined,
+  school: SchoolId,
+  period: Period,
+  currentName: string,
+): Weekday[] {
+  if (!plan) return []
+  return WEEKDAYS.filter((weekday) =>
+    plan[weekday][school][period].availableParents.some((parent) =>
+      sameName(parent, currentName),
+    ),
+  )
 }
 
 export default function App() {
@@ -214,6 +228,30 @@ export default function App() {
     const next: AppState = structuredClone(state)
     ensureWeek(next, next.weekStart)
     next.plans[next.weekStart][day][school][period] = slot
+    setState(next)
+    void persist(next)
+  }
+
+  function setParentAvailability(
+    weekday: Weekday,
+    weekOffset: 0 | 1,
+    available: boolean,
+  ) {
+    if (!state || !selected) return
+    const weekStart =
+      weekOffset === 0 ? state.weekStart : shiftWeek(state.weekStart, 1)
+    const next: AppState = structuredClone(state)
+    const plan = ensureWeek(next, weekStart)
+    const slot = plan[weekday][selected.school][selected.period]
+    if (available) {
+      slot.availableParents = withName(slot.availableParents, name)
+    } else {
+      slot.availableParents = withoutName(slot.availableParents, name)
+      if (slot.accompanying && sameName(slot.accompanying, name)) {
+        slot.accompanying = null
+      }
+    }
+    setState(next)
     void persist(next)
   }
 
@@ -303,10 +341,22 @@ export default function App() {
 
   const plan = ensureWeek(state, state.weekStart)
   const thisWeek = getMonday()
+  const nextWeekStart = shiftWeek(state.weekStart, 1)
   const canGoBack = state.weekStart > oldestAllowedWeek()
   const selectionSlot = selected
     ? plan[selected.day][selected.school][selected.period]
     : null
+  const thisWeekAvailable = selected
+    ? daysWithParent(plan, selected.school, selected.period, name)
+    : []
+  const nextWeekAvailable = selected
+    ? daysWithParent(
+        state.plans[nextWeekStart],
+        selected.school,
+        selected.period,
+        name,
+      )
+    : []
 
   return (
     <div className="app-shell">
@@ -407,9 +457,14 @@ export default function App() {
             period={selected.period}
             slot={selectionSlot}
             currentName={name}
+            thisWeekDays={thisWeekAvailable}
+            nextWeekDays={nextWeekAvailable}
+            thisWeekRange={formatWeekRange(state.weekStart)}
+            nextWeekRange={formatWeekRange(nextWeekStart)}
             onChange={(slot) =>
               updateSlot(selected.day, selected.school, selected.period, slot)
             }
+            onToggleDay={setParentAvailability}
             onClose={() => setSelected(null)}
           />
         ) : null}
