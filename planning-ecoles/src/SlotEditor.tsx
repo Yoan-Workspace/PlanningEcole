@@ -1,14 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { PERIODS, SCHOOLS, WEEKDAY_LABELS, WEEKDAY_SHORT, WEEKDAYS } from './constants'
+import { PERIODS, SCHOOLS, WEEKDAYS, WEEKDAY_SHORT } from './constants'
 import { sameName, withName, withoutName } from './names'
 import type { Period, SchoolId, Slot, Weekday } from './types'
-
-function formatDayList(days: Weekday[]): string {
-  const labels = days.map((item) => WEEKDAY_LABELS[item].toLowerCase())
-  if (labels.length === 1) return labels[0]
-  if (labels.length === 2) return `${labels[0]} et ${labels[1]}`
-  return `${labels.slice(0, -1).join(', ')} et ${labels[labels.length - 1]}`
-}
 
 interface SlotEditorProps {
   day: Weekday
@@ -17,9 +10,74 @@ interface SlotEditorProps {
   period: Period
   slot: Slot
   currentName: string
+  thisWeekDays: Weekday[]
+  nextWeekDays: Weekday[]
+  thisWeekRange: string
+  nextWeekRange: string
   onChange: (slot: Slot) => void
-  onRepeat: (days: Weekday[], available: boolean) => void
+  onToggleDay: (weekday: Weekday, weekOffset: 0 | 1, available: boolean) => void
   onClose: () => void
+}
+
+function extraDaysSummary(
+  thisWeekDays: Weekday[],
+  nextWeekDays: Weekday[],
+  currentDay: Weekday,
+): string | null {
+  const extraThis = thisWeekDays.filter((weekday) => weekday !== currentDay)
+  if (extraThis.length === 0 && nextWeekDays.length === 0) return null
+  const parts: string[] = []
+  if (extraThis.length) {
+    parts.push(extraThis.map((weekday) => WEEKDAY_SHORT[weekday]).join(', '))
+  }
+  if (nextWeekDays.length === WEEKDAYS.length) {
+    parts.push('toute la suivante')
+  } else if (nextWeekDays.length) {
+    parts.push(
+      `suiv. ${nextWeekDays.map((weekday) => WEEKDAY_SHORT[weekday]).join(', ')}`,
+    )
+  }
+  return parts.join(' · ')
+}
+
+function DayPicks({
+  label,
+  range,
+  selected,
+  here,
+  onToggle,
+}: {
+  label: string
+  range: string
+  selected: Weekday[]
+  here?: Weekday
+  onToggle: (weekday: Weekday, nextOn: boolean) => void
+}) {
+  return (
+    <div className="repeat-box" role="group" aria-label={`${label}, ${range}`}>
+      <p className="repeat-week-label">
+        {label}
+        <span>{range}</span>
+      </p>
+      <div className="repeat-days">
+        {WEEKDAYS.map((weekday) => {
+          const on = selected.includes(weekday)
+          return (
+            <button
+              key={weekday}
+              type="button"
+              className={`repeat-day ${on ? 'on' : ''} ${here === weekday ? 'here' : ''}`}
+              aria-pressed={on}
+              onClick={() => onToggle(weekday, !on)}
+            >
+              {WEEKDAY_SHORT[weekday]}
+              {here === weekday ? <em>ici</em> : null}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 export function SlotEditor({
@@ -29,24 +87,30 @@ export function SlotEditor({
   period,
   slot,
   currentName,
+  thisWeekDays,
+  nextWeekDays,
+  thisWeekRange,
+  nextWeekRange,
   onChange,
-  onRepeat,
+  onToggleDay,
   onClose,
 }: SlotEditorProps) {
   const schoolMeta = SCHOOLS.find((s) => s.id === school)!
   const periodLabel = PERIODS.find((p) => p.id === period)!.label
   const isAvailable = slot.availableParents.some((n) => sameName(n, currentName))
   const [comment, setComment] = useState(slot.comment ?? '')
-  const [repeatDays, setRepeatDays] = useState<Weekday[]>([day])
-  const [repeatDone, setRepeatDone] = useState(false)
+  const [moreDaysOpen, setMoreDaysOpen] = useState(false)
   const commentRef = useRef(comment)
   commentRef.current = comment
+  const extraSummary = extraDaysSummary(thisWeekDays, nextWeekDays, day)
 
   useEffect(() => {
     setComment(slot.comment ?? '')
-    setRepeatDays([day])
-    setRepeatDone(false)
   }, [slot.comment, day, school, period])
+
+  useEffect(() => {
+    setMoreDaysOpen(false)
+  }, [day, school, period])
 
   useEffect(() => {
     const mobile = window.matchMedia('(max-width: 719px)')
@@ -75,7 +139,14 @@ export function SlotEditor({
       accompanying = null
     }
     onChange({ ...slot, availableParents, accompanying, comment: commentRef.current.trim() })
-    setRepeatDone(false)
+  }
+
+  function toggleThisWeekDay(weekday: Weekday, nextOn: boolean) {
+    if (weekday === day) {
+      if (nextOn !== isAvailable) toggleParent()
+      return
+    }
+    onToggleDay(weekday, 0, nextOn)
   }
 
   function toggleChild(name: string) {
@@ -91,21 +162,6 @@ export function SlotEditor({
       comment: commentRef.current.trim(),
       accompanying: slot.accompanying && sameName(slot.accompanying, name) ? null : name,
     })
-  }
-
-  function toggleRepeatDay(weekday: Weekday) {
-    setRepeatDone(false)
-    setRepeatDays((current) =>
-      current.includes(weekday)
-        ? current.filter((item) => item !== weekday)
-        : WEEKDAYS.filter((item) => item === weekday || current.includes(item)),
-    )
-  }
-
-  function applyRepeat() {
-    if (repeatDays.length === 0) return
-    onRepeat(repeatDays, isAvailable)
-    setRepeatDone(true)
   }
 
   return (
@@ -147,41 +203,44 @@ export function SlotEditor({
               <span className="switch-thumb" />
             </span>
           </button>
-        </section>
 
-        <section>
-          <h3>Répéter ces jours-là</h3>
-          <p className="hint">
-            Cette semaine et les 2 suivantes. Même école, même moment.
-          </p>
-          <div className="chip-grid">
-            {WEEKDAYS.map((weekday) => {
-              const checked = repeatDays.includes(weekday)
-              return (
-                <button
-                  key={weekday}
-                  type="button"
-                  className={`chip ${checked ? 'on' : ''}`}
-                  aria-pressed={checked}
-                  onClick={() => toggleRepeatDay(weekday)}
-                >
-                  {WEEKDAY_SHORT[weekday]}
-                </button>
-              )
-            })}
+          <div className={`repeat ${moreDaysOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="repeat-summary"
+              aria-expanded={moreDaysOpen}
+              aria-controls="repeat-panel"
+              onClick={() => setMoreDaysOpen((open) => !open)}
+            >
+              <span className="repeat-summary-copy">
+                <strong>Aussi d’autres jours</strong>
+                <span>{extraSummary ?? 'Cette semaine et la suivante'}</span>
+              </span>
+              <span className="repeat-chevron" aria-hidden="true" />
+            </button>
+
+            {moreDaysOpen ? (
+              <div className="repeat-panel" id="repeat-panel">
+                <p className="hint">
+                  Même école, même moment. Touche un jour : tu y es proposé. Les
+                  enfants se règlent à part.
+                </p>
+                <DayPicks
+                  label="Cette semaine"
+                  range={thisWeekRange}
+                  selected={thisWeekDays}
+                  here={day}
+                  onToggle={toggleThisWeekDay}
+                />
+                <DayPicks
+                  label="Semaine suivante"
+                  range={nextWeekRange}
+                  selected={nextWeekDays}
+                  onToggle={(weekday, nextOn) => onToggleDay(weekday, 1, nextOn)}
+                />
+              </div>
+            ) : null}
           </div>
-          <button
-            type="button"
-            className="ghost repeat-btn"
-            disabled={repeatDays.length === 0}
-            onClick={applyRepeat}
-          >
-            {repeatDone
-              ? 'C’est noté pour cette semaine et les 2 suivantes'
-              : isAvailable
-                ? `Me proposer ${formatDayList(repeatDays)}`
-                : `Me retirer ${formatDayList(repeatDays)}`}
-          </button>
         </section>
 
         <section>
