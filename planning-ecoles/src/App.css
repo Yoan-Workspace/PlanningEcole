@@ -335,11 +335,15 @@ button.ghost {
 }
 
 .sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   font-size: 0.7rem;
   font-weight: 600;
   padding: 0.28rem 0.55rem;
   border-radius: 999px;
   white-space: nowrap;
+  min-height: 28px;
 }
 
 .sync.cloud {
@@ -352,6 +356,20 @@ button.ghost {
   background: rgba(27, 39, 31, 0.06);
 }
 
+.sync.saving {
+  color: var(--wait);
+  background: rgba(180, 83, 9, 0.14);
+}
+
+.sync.saving::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: sync-dot 0.9s ease-in-out infinite;
+}
+
 .sync.error {
   color: #a33a1d;
   background: rgba(163, 58, 29, 0.12);
@@ -361,6 +379,167 @@ button.ghost {
 
 .sync.error:active {
   transform: none;
+}
+
+.sync-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem 1.1rem calc(1.4rem + var(--safe-bottom));
+  background: rgba(18, 32, 26, 0.5);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  touch-action: none;
+}
+
+.sync-overlay-card {
+  width: min(340px, 100%);
+  display: grid;
+  justify-items: stretch;
+  gap: 0.15rem;
+  padding: 1.35rem 1.2rem 1.25rem;
+  border-radius: 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 22px 48px rgba(18, 32, 26, 0.22);
+}
+
+.sync-overlay .sync-mark {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 40 / 18;
+  overflow: visible;
+}
+
+.sync-scene-labels {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 0.15rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.sync-scene-labels span:first-child {
+  color: var(--brand);
+}
+
+.sync-scene-labels span:last-child {
+  color: var(--accent);
+}
+
+.sync-overlay-copy {
+  margin: 0;
+  display: grid;
+  gap: 0.12rem;
+  text-align: center;
+}
+
+.sync-overlay-copy strong {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.sync-overlay-copy span {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.sync-ground {
+  fill: none;
+  stroke: rgba(27, 39, 31, 0.12);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+
+.sync-school.michelis {
+  fill: var(--brand);
+}
+
+.sync-school.ndj {
+  fill: var(--accent);
+}
+
+.sync-door {
+  fill: #fffcf7;
+}
+
+.sync-road {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.9;
+  stroke-linecap: round;
+  stroke-dasharray: 1.6 1.4;
+  opacity: 0.4;
+}
+
+.sync-kid {
+  fill: var(--ink);
+  transform-box: view-box;
+  transform-origin: 0 0;
+  animation: trajet-run 1.35s ease-in-out infinite;
+}
+
+.sync-overlay .sync-school.michelis {
+  animation: school-pulse 1.35s ease-in-out infinite;
+}
+
+.sync-overlay .sync-school.ndj {
+  animation: school-pulse 1.35s ease-in-out infinite 0.67s;
+}
+
+@keyframes sync-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes trajet-run {
+  0%,
+  100% {
+    transform: translate(0%, 0%);
+  }
+  25% {
+    transform: translate(28%, -8%);
+  }
+  50% {
+    transform: translate(58%, 0%);
+  }
+  75% {
+    transform: translate(28%, -8%);
+  }
+}
+
+@keyframes school-pulse {
+  0%,
+  100% {
+    opacity: 0.62;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-kid,
+  .sync-overlay .sync-school.michelis,
+  .sync-overlay .sync-school.ndj,
+  .sync.saving::before {
+    animation: none;
+  }
+
+  .sync-kid {
+    transform: translate(28%, 0%);
+  }
 }
 
 .week-nav {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal, flushSync } from 'react-dom'
 import { AccessGate } from './AccessGate'
 import { fetchSession, logout, type SessionStatus } from './auth'
 import { SESSION_NAME_KEY, TUTORIAL_SEEN_KEY, WEEKDAYS } from './constants'
@@ -58,6 +59,57 @@ function daysWithParent(
   )
 }
 
+function SaveTrajetMark() {
+  return (
+    <svg className="sync-mark" viewBox="0 0 40 18" aria-hidden="true">
+      <path className="sync-ground" d="M1 16.2h38" />
+      <path
+        className="sync-school michelis"
+        d="M1.5 15.5V8.4L8 3.2l6.5 5.2v7.1H11V11H5v4.5H1.5Z"
+      />
+      <rect className="sync-door" x="6.7" y="11.2" width="2.6" height="4.3" rx="0.4" />
+      <path
+        className="sync-school ndj"
+        d="M25.5 15.5V8.4L32 3.2l6.5 5.2v7.1H35V11h-6v4.5h-3.5Z"
+      />
+      <rect className="sync-door" x="30.7" y="11.2" width="2.6" height="4.3" rx="0.4" />
+      <path className="sync-road" d="M14.6 15.35h10.8" />
+      <g className="sync-kid">
+        <circle cx="8" cy="10.15" r="1.2" />
+        <circle cx="8" cy="13.55" r="1.65" />
+      </g>
+    </svg>
+  )
+}
+
+function SavingOverlay({
+  open,
+  title,
+  hint,
+}: {
+  open: boolean
+  title: string
+  hint: string
+}) {
+  if (!open) return null
+  return createPortal(
+    <div className="sync-overlay" role="status" aria-live="polite" aria-busy="true">
+      <div className="sync-overlay-card">
+        <SaveTrajetMark />
+        <div className="sync-scene-labels">
+          <span>Michelis</span>
+          <span>NDJ</span>
+        </div>
+        <p className="sync-overlay-copy">
+          <strong>{title}</strong>
+          <span>{hint}</span>
+        </p>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 export default function App() {
   const [session, setSession] = useState<SessionStatus>('checking')
   const [name, setName] = useState(
@@ -67,7 +119,9 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Selection | null>(null)
   const [saving, setSaving] = useState(false)
+  const [savingUi, setSavingUi] = useState(false)
   const [saveError, setSaveError] = useState(false)
+  const savingShownAt = useRef(0)
   const [cloud, setCloud] = useState(false)
   const [helpOpen, setHelpOpen] = useState(() => !hasSeenTutorial())
   const savingRef = useRef(false)
@@ -123,6 +177,17 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (saving) {
+      savingShownAt.current = Date.now()
+      setSavingUi(true)
+      return
+    }
+    const remain = Math.max(0, 900 - (Date.now() - savingShownAt.current))
+    const id = window.setTimeout(() => setSavingUi(false), remain)
+    return () => window.clearTimeout(id)
+  }, [saving])
+
+  useEffect(() => {
     if (session !== 'in') return
     return subscribeToCloud(
       (remote) => {
@@ -149,8 +214,12 @@ export default function App() {
     }
 
     savingRef.current = true
-    setSaving(true)
     dirtyRef.current = true
+    savingShownAt.current = Date.now()
+    flushSync(() => {
+      setSaving(true)
+      setSavingUi(true)
+    })
 
     try {
       while (pendingPersistRef.current) {
@@ -323,7 +392,11 @@ export default function App() {
   if (loading || !state) {
     return (
       <div className="gate">
-        <p className="loading">Chargement du planning…</p>
+        <SavingOverlay
+          open
+          title="Chargement"
+          hint="On récupère le planning des deux écoles"
+        />
       </div>
     )
   }
@@ -402,8 +475,12 @@ export default function App() {
                 Non enregistré
               </button>
             ) : (
-              <span className={`sync ${cloud ? 'cloud' : 'local'}`}>
-                {cloud ? (saving ? 'Enregistrement…' : 'Enregistré') : 'Cet appareil'}
+              <span
+                className={`sync ${savingUi ? 'saving' : cloud ? 'cloud' : 'local'}`}
+                aria-live="polite"
+                aria-busy={savingUi}
+              >
+                {savingUi ? 'Enregistrement…' : cloud ? 'Enregistré' : 'Cet appareil'}
               </span>
             )}
           </div>
@@ -469,6 +546,11 @@ export default function App() {
           />
         ) : null}
         <HowItWorks open={helpOpen} onClose={closeHelp} />
+        <SavingOverlay
+          open={savingUi}
+          title="Enregistrement"
+          hint="Le planning des deux écoles se met à jour"
+        />
       </main>
     </div>
   )
