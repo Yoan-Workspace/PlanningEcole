@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal, flushSync } from 'react-dom'
+import { createPortal } from 'react-dom'
 import { AccessGate } from './AccessGate'
 import { fetchSession, logout, type SessionStatus } from './auth'
 import { SESSION_NAME_KEY, TUTORIAL_SEEN_KEY, WEEKDAYS } from './constants'
@@ -21,6 +21,7 @@ import {
   scrollWeekday,
   shiftWeek,
   subscribeToCloud,
+  writeLocalState,
 } from './storage'
 import type { AppState, Period, SchoolId, Slot, WeekPlan, Weekday } from './types'
 import { WeekBoard } from './WeekBoard'
@@ -28,6 +29,10 @@ import { WhoAreYou } from './WhoAreYou'
 import './App.css'
 
 type Selection = { day: Weekday; school: SchoolId; period: Period }
+
+const SLOT_SAVE_DELAY = 500
+const NOTE_SAVE_DELAY = 2000
+const SLOW_SAVE_MS = 700
 
 function hasSeenTutorial(): boolean {
   try {
@@ -121,7 +126,6 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [savingUi, setSavingUi] = useState(false)
   const [saveError, setSaveError] = useState(false)
-  const savingShownAt = useRef(0)
   const [cloud, setCloud] = useState(false)
   const [helpOpen, setHelpOpen] = useState(() => !hasSeenTutorial())
   const savingRef = useRef(false)
@@ -131,6 +135,9 @@ export default function App() {
   const persistTimer = useRef(0)
   const pendingPersistRef = useRef<AppState | null>(null)
   const viewWeekRef = useRef(getMonday())
+  const persistRef = useRef<(next: AppState) => Promise<void>>(async () => {})
+  const stateRef = useRef<AppState | null>(null)
+  stateRef.current = state
 
   useEffect(() => {
     let cancelled = false
@@ -173,17 +180,24 @@ export default function App() {
   }, [session])
 
   useEffect(() => {
-    return () => window.clearTimeout(persistTimer.current)
+    const flushIfHidden = () => {
+      if (document.visibilityState === 'hidden') flushPendingPersist()
+    }
+    document.addEventListener('visibilitychange', flushIfHidden)
+    window.addEventListener('pagehide', flushPendingPersist)
+    return () => {
+      window.clearTimeout(persistTimer.current)
+      document.removeEventListener('visibilitychange', flushIfHidden)
+      window.removeEventListener('pagehide', flushPendingPersist)
+    }
   }, [])
 
   useEffect(() => {
-    if (saving) {
-      savingShownAt.current = Date.now()
-      setSavingUi(true)
+    if (!saving) {
+      setSavingUi(false)
       return
     }
-    const remain = Math.max(0, 900 - (Date.now() - savingShownAt.current))
-    const id = window.setTimeout(() => setSavingUi(false), remain)
+    const id = window.setTimeout(() => setSavingUi(true), SLOW_SAVE_MS)
     return () => window.clearTimeout(id)
   }, [saving])
 
@@ -215,11 +229,7 @@ export default function App() {
 
     savingRef.current = true
     dirtyRef.current = true
-    savingShownAt.current = Date.now()
-    flushSync(() => {
-      setSaving(true)
-      setSavingUi(true)
-    })
+    setSaving(true)
 
     try {
       while (pendingPersistRef.current) {
@@ -242,6 +252,7 @@ export default function App() {
           const weekStart = viewWeekRef.current
           const shown = { ...saved, weekStart }
           ensureWeek(shown, weekStart)
+          stateRef.current = shown
           setState(shown)
           setSaveError(false)
           dirtyRef.current = false
@@ -255,16 +266,18 @@ export default function App() {
       setSaving(false)
     }
   }
+  persistRef.current = persist
 
-  function persistSoon(next: AppState, delay = 2000) {
+  function persistSoon(next: AppState, delay = NOTE_SAVE_DELAY) {
     dirtyRef.current = true
     localUpdatedAt.current = Date.now()
     pendingPersistRef.current = next
+    writeLocalState(next)
     window.clearTimeout(persistTimer.current)
     persistTimer.current = window.setTimeout(() => {
       persistTimer.current = 0
       const pending = pendingPersistRef.current
-      if (pending) void persist(pending)
+      if (pending) void persistRef.current(pending)
     }, delay)
   }
 
@@ -272,7 +285,7 @@ export default function App() {
     window.clearTimeout(persistTimer.current)
     persistTimer.current = 0
     const pending = pendingPersistRef.current
-    if (pending) void persist(pending)
+    if (pending) void persistRef.current(pending)
   }
 
   function rememberName(value: string) {
@@ -283,22 +296,26 @@ export default function App() {
   }
 
   function addParent(value: string): boolean {
-    if (!state) return false
-    const nextList = withName(state.parents ?? [], value)
-    if (nextList.length === (state.parents ?? []).length) return false
-    const next: AppState = structuredClone(state)
+    const current = stateRef.current
+    if (!current) return false
+    const nextList = withName(current.parents ?? [], value)
+    if (nextList.length === (current.parents ?? []).length) return false
+    const next: AppState = structuredClone(current)
     next.parents = nextList
+    stateRef.current = next
     void persist(next)
     return true
   }
 
   function updateSlot(day: Weekday, school: SchoolId, period: Period, slot: Slot) {
-    if (!state) return
-    const next: AppState = structuredClone(state)
+    const current = stateRef.current
+    if (!current) return
+    const next: AppState = structuredClone(current)
     ensureWeek(next, next.weekStart)
     next.plans[next.weekStart][day][school][period] = slot
+    stateRef.current = next
     setState(next)
-    void persist(next)
+    persistSoon(next, SLOT_SAVE_DELAY)
   }
 
   function setParentAvailability(
@@ -306,10 +323,11 @@ export default function App() {
     weekOffset: 0 | 1,
     available: boolean,
   ) {
-    if (!state || !selected) return
+    const current = stateRef.current
+    if (!current || !selected) return
     const weekStart =
-      weekOffset === 0 ? state.weekStart : shiftWeek(state.weekStart, 1)
-    const next: AppState = structuredClone(state)
+      weekOffset === 0 ? current.weekStart : shiftWeek(current.weekStart, 1)
+    const next: AppState = structuredClone(current)
     const plan = ensureWeek(next, weekStart)
     const slot = plan[weekday][selected.school][selected.period]
     if (available) {
@@ -320,15 +338,18 @@ export default function App() {
         slot.accompanying = null
       }
     }
+    stateRef.current = next
     setState(next)
-    void persist(next)
+    persistSoon(next, SLOT_SAVE_DELAY)
   }
 
   function updateDayNote(day: Weekday, note: string) {
-    if (!state) return
-    const next: AppState = structuredClone(state)
+    const current = stateRef.current
+    if (!current) return
+    const next: AppState = structuredClone(current)
     ensureWeek(next, next.weekStart)
     next.plans[next.weekStart][day].note = note
+    stateRef.current = next
     setState(next)
     persistSoon(next)
   }
@@ -361,11 +382,13 @@ export default function App() {
   }, [])
 
   function openHelp() {
+    flushPendingPersist()
     setSelected(null)
     setHelpOpen(true)
   }
 
   async function handleLogout() {
+    flushPendingPersist()
     await logout()
     setState(null)
     setSelected(null)
@@ -476,11 +499,11 @@ export default function App() {
               </button>
             ) : (
               <span
-                className={`sync ${savingUi ? 'saving' : cloud ? 'cloud' : 'local'}`}
+                className={`sync ${saving ? 'saving' : cloud ? 'cloud' : 'local'}`}
                 aria-live="polite"
-                aria-busy={savingUi}
+                aria-busy={saving}
               >
-                {savingUi ? 'Enregistrement…' : cloud ? 'Enregistré' : 'Cet appareil'}
+                {saving ? 'Enregistrement…' : cloud ? 'Enregistré' : 'Cet appareil'}
               </span>
             )}
           </div>
@@ -542,7 +565,10 @@ export default function App() {
               updateSlot(selected.day, selected.school, selected.period, slot)
             }
             onToggleDay={setParentAvailability}
-            onClose={() => setSelected(null)}
+            onClose={() => {
+              flushPendingPersist()
+              setSelected(null)
+            }}
           />
         ) : null}
         <HowItWorks open={helpOpen} onClose={closeHelp} />
